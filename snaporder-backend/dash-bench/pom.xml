@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.campusdash</groupId>
+    <artifactId>campus-dash</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>dash-bench</artifactId>
+  <dependencies>
+    <dependency><groupId>com.campusdash</groupId><artifactId>dash-shared</artifactId></dependency>
+    <!-- BlacklistKeyTool 复用 infrastructure.risk.DeviceHasher 计算黑名单键。
+         不能在这里复制一份 HMAC 逻辑：工具算出的键必须与应用查询的键逐字节相同，
+         复制必然漂移，而漂移的后果是黑名单静默失效（查得到、不报错、永不命中）。
+         无环：dash-bench -> dash-infrastructure -> dash-domain -> dash-shared，
+         而 dash-bootstrap -> dash-bench 是 test scope，不构成回环。 -->
+    <dependency><groupId>com.campusdash</groupId><artifactId>dash-infrastructure</artifactId></dependency>
+    <dependency><groupId>com.mysql</groupId><artifactId>mysql-connector-j</artifactId></dependency>
+    <dependency><groupId>org.apache.rocketmq</groupId><artifactId>rocketmq-client-java</artifactId></dependency>
+  </dependencies>
+</project>

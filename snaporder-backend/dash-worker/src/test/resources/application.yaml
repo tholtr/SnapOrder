@@ -1,0 +1,62 @@
+# 测试配置：**整体替换** src/main/resources/application.yaml，不是合并（K-1）。
+# Spring Boot 不会把两份同名文件合起来——测试资源目录里这份就是全部。
+# 所以这里是主配置的整份抄写，任何漏抄的段都会变成一条启动失败，
+# 而且报错不会指向「你漏抄了」。改主配置时，这份要跟着改。
+#
+# 与主配置的两处差异，都写在下面各自的注释里。
+#
+# 这里**没有**关掉定时任务的配置项，因为关不掉：五个 @Scheduled 任务都写成
+# fixedDelay/cron 而不带 initialDelay，**第一次执行在启动瞬间就发生**，
+# 把间隔放大只能推迟第二次。它们是靠 WorkerApplicationContextTest 注册的
+# NoScheduling（一个永不触发的 TaskScheduler）整体挡住的，见那个类的说明。
+spring:
+  application:
+    name: campus-dash-worker
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3307/campus_dash?useSSL=false&serverTimezone=Asia/Shanghai
+    username: root
+    password: dash123456
+    hikari:
+      maximum-pool-size: 16
+      minimum-idle: 2
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6380
+
+dash:
+  ws:
+    enabled: false
+  worker-id: 2
+  mq:
+    # 差异一：测试不起 broker。这也是全仓 27 个 IT 的一致做法（dash.mq.enabled=false），
+    # 关掉后退化为 Noop 适配器，上下文不再需要 broker。注意这只解决 broker——
+    # Redis 是躲不掉的（RedissonConfig 无条件装配，建 bean 时就连接），
+    # 所以 WorkerApplicationContextTest 仍然带 MySQL/Redis 守卫。
+    # 真正要连 broker 的是 RiskEventIT（P9.4 任务 17），它在守卫里再加一个 MQ 探测。
+    enabled: false
+    endpoints: 127.0.0.1:8081
+    topic:
+      confirm-timeout: errand-confirm-timeout
+    group:
+      confirm-timeout: dash-timeout-consumer
+  timeout:
+    confirm-seconds: 300
+    consumer-threads: 32
+    max-transfer-rounds: 5
+    scan-grace-seconds: 2
+  message:
+    retry-interval-ms: 10000
+  cache:
+    # 差异二：BloomRebuildJob 是 @PostConstruct，启动时就会连 MySQL 灌 1600+ 条 id。
+    # 上下文测试不测它，关掉。
+    # 这一条 NoScheduling 挡不住——那边挡的是 @Scheduled，@PostConstruct 不在它的范围里，
+    # 所以两个开关各管一段，都需要。
+    bloom-enabled: false
+  credit:
+    calibration-cron: "0 0 3 * * ?"
+    calibration-batch-size: 1000
+
+logging:
+  level:
+    com.campusdash: INFO

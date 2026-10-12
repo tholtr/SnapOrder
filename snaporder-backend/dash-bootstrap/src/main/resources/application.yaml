@@ -1,0 +1,139 @@
+server:
+  port: 8080
+  tomcat:
+    threads:
+      max: 200          # P7 的 R3 会用压测数据重新定这个值
+    accept-count: 500
+
+spring:
+  application:
+    name: campus-dash
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3307/campus_dash?useSSL=false&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
+    username: root
+    password: dash123456
+    hikari:
+      # 连接池不是越大越好：HikariCP 官方建议 CPU 核数 * 2 + 磁盘数。
+      # P7 的容量评估会用 10/50/100/200 的实测曲线验证这个结论。
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 3000
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6380
+      lettuce:
+        pool:
+          max-active: 64
+          max-idle: 32
+          min-idle: 8
+      timeout: 2000ms
+
+dash:
+  worker-id: 1
+  auth:
+    # 生产默认 false：只认 Bearer token。谁把这个开关开进生产，
+    # 等于任何人带个 X-User-Id 就能冒充任何人。
+    allow-header-identity: false
+    arbitrator-id: 9001
+    session-ttl-minutes: 120
+    refresh-ttl-minutes: 10080    # P6：JWT refresh token，默认 7 天
+  settle:
+    commission-rate: 0.05
+    auto-settle-seconds: 86400
+  mq:
+    enabled: true                 # 关掉则退化为纯兜底扫描，应用仍可用
+    endpoints: 127.0.0.1:8081     # RocketMQ 5.x gRPC proxy
+    topic:
+      confirm-timeout: errand-confirm-timeout
+  timeout:
+    confirm-seconds: 300
+    max-transfer-rounds: 5      # 防无限流转：超过则回退让所有人重新抢          # 生产 5 分钟；测试用 @TestPropertySource 压到 2 秒
+
+  grab:
+    limit:
+      type: sentinel            # P7：生产默认使用 Sentinel 热点参数限流；local 可切回单机固定窗口
+      enabled: true             # P7：抢单 L1 热点限流
+      per-second: 500           # 单实例、单任务每秒放行数，S2 阶梯加压后定参
+      resource: campus_dash_grab
+
+  risk:
+    enabled: true
+    # 只认环境变量，且**不写任何可用值**——空默认值 + RiskProperties 的紧凑构造器校验，
+    # 缺失时应用启动即失败。把密钥写死在这行等于提交进代码库，正是蓝图 §3.10 禁止的。
+    # 本地运行：DASH_RISK_DEVICE_HMAC_SECRET=local-dev-secret mvn spring-boot:run
+    device-hmac-secret: ${DASH_RISK_DEVICE_HMAC_SECRET:}
+    # 以下两个 key 供 presentation 使用，走 @Value 而不是 RiskProperties——
+    # presentation 只依赖 application，看不见 dash-infrastructure（见 RiskProperties 注释）
+    test-context-enabled: false
+    trusted-proxy-cidrs: ""
+    # SHADOW = 照常计算并记录风险结果，但不拦截、也不读写限频键。
+    # 蓝图 §3.10 定的默认值：先观察一段真实流量的误伤率，再切 ENFORCE。
+    mode: SHADOW
+    # 预检的时间预算（毫秒），从预检入口起算。**0 是合法值**：语义是「一步都不许跑」，
+    # 强制走降级路径——这是故障降级唯一的纯配置触发方式（P9.3 D11）；负数启动即拒。
+    # 它与 spring.data.redis.timeout（2000ms）不是一回事：那是**在途命令**的上界，
+    # 预算大于它没有意义，这条关系由运维保证（P9.3 §4.3）。
+    deadline-ms: 10
+    # 预算耗尽、且决策结果仍是 PASS 时是否放行（P9.3 D7）。**只作用于这一种情形**：
+    # 其余降级照常参与决策，「降级不等于放行」（蓝图 §3.8）。配 false = 证据不全就
+    # 拒绝；切 ENFORCE 前先用默认 true 观察真实流量。
+    fail-open: true
+    # LIMIT 命中后该用户被限频的时长，也是 risk:limit:user:{userId} 的 TTL。
+    # 必须 > 0，否则键写进去立刻过期，限频静默失效（RiskProperties 启动即拒）。
+    limit-cooldown-ms: 10000
+    # 规则版本号，标识「本次决策用的哪套阈值」。阈值是配置的一部分，
+    # 所以同一份代码配两套阈值就是两套规则——**改任何风控阈值时必须同步升这个值**，
+    # 否则离线分析无法把改动前后的指标分开（见 P9.2 设计 §3.3）。
+    rule-version: "1"
+    # 成员上限不在这里配置，由阈值推导（cap = threshold + 1），
+    # 避免 cap 配得比阈值小导致规则静默失效（见 RiskProperties.UserWindow）
+    user-window:
+      short-seconds: 10
+      short-threshold: 5
+      long-seconds: 60
+      long-threshold: 30
+    device-window:
+      seconds: 600
+      threshold: 8                  # 高阈值（BLOCK）：同设备关联账号数超过它即强拦截
+      low-threshold: 3              # 低阈值（REVIEW）：必须严格小于高阈值，否则低档规则永远走不到
+    ip-account-window:
+      seconds: 600
+      threshold: 10
+    ip-rate-window:
+      seconds: 60
+      threshold: 100
+    # 降级事件聚合闸门的主体（P9.4）。降级是「这个实例的某个依赖挂了」，
+    # 不是「这个用户有问题」，所以按实例聚合而不是按用户。**没有默认值**：
+    # 缺失时启动即失败，因为一个空的实例标识会让所有实例算出同一个键，
+    # 闸门悄悄从「每实例一条」变成「全局一条」——不报错，只是指标的分母错了。
+    # 容器里 HOSTNAME 天然存在；本机跑 spring-boot:run 时回退成 unknown。
+    instance-id: ${HOSTNAME:unknown}
+    # 时间窗聚合总开关（P9.4）。**关掉它不改变任何同步风险决策结果**
+    # （蓝图 §3.9 的硬约束：聚合不得影响同步决策）——它只影响「有几条上了 MQ」。
+    # 这也是 P9.5 对照实验的自变量，所以必须能用一个配置项切换，不必改代码。
+    event-aggregation-enabled: true
+
+  credit:
+    min-score: 40
+    max-ongoing: 5
+    calibration-cron: "0 0 3 * * ?"
+    calibration-batch-size: 1000
+
+  cache:
+    enabled: true
+    shards: 4                 # 热 Key 分片数：读随机挑一片，失效时全片删
+    ttl-seconds: 600          # 物理 TTL 10 分钟
+    jitter-seconds: 120       # ±2 分钟随机抖动，防雪崩（大批 key 同时到期）
+    empty-ttl-seconds: 60     # 空值缓存 TTL，防穿透
+    double-delete-ms: 500     # 延迟双删间隔
+    double-delete-enabled: true
+    eviction-order: AFTER_COMMIT   # 生产恒为 AFTER_COMMIT；BEFORE_COMMIT 仅供对照实验
+    bloom-enabled: true
+    redisson-pool-size: 16    # 与 Lettuce 池分开，避免叠加打满 Redis
+  web:
+    cors-origins: http://localhost:5173,http://127.0.0.1:5173
+
+logging:
+  level:
+    com.campusdash: INFO
