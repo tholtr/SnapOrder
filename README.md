@@ -2,10 +2,6 @@
 
 校园跑腿抢单市场：发单人悬赏（资金托管）→ N 人并发抢单、恰好一人成功 → 超时自动流转 → 送达确认后结算。
 
-业务链路短，但每个环节都压在硬骨头上——抢单正确性可验证（超卖就是错），资金正确性可验证（借贷不平就是错）。
-
-> 📌 本文件为占位版本，各子系统的完整说明见下方「文档」一节。
-
 ## 目录结构
 
 ```
@@ -23,15 +19,6 @@ SnapOrder/
 │   └── docs/                         # 架构设计、设计演进记录、压测方案
 └── snaporder-frontend/           # React 18 + TypeScript + Vite 前端
 ```
-
-## 技术栈
-
-| 层 | 选型 |
-|---|---|
-| 语言 / 框架 | JDK 21 · Spring Boot · DDD 洋葱架构 |
-| 存储 | MySQL 8 · Redis 7 · ShardingSphere |
-| 消息 / 限流 | RocketMQ 5.3.1 · Sentinel |
-| 前端 | React 18 · TypeScript · Vite 5 |
 
 ## 快速开始
 
@@ -51,11 +38,3 @@ mvn -pl dash-bootstrap spring-boot:run
 cd snaporder-frontend
 npm install && npm run dev
 ```
-
-## 文档
-
-- [后端说明与期次进度](snaporder-backend/README.md)
-- [设计演进记录（决策与踩坑）](snaporder-backend/docs/设计演进记录.md)
-- [架构设计与技术选型](snaporder-backend/docs/架构设计与技术选型.md)
-- [压测方案与容量评估](snaporder-backend/docs/压测方案与容量评估.md)
-- [前端说明](snaporder-frontend/README.md)
